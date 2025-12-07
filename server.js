@@ -303,7 +303,7 @@ app.post('/generate-thumbnail', async (req, res) => {
     
     const imgbbResponse = await axios.post('https://api.imgbb.com/1/upload', formData, {
       params: {
-        key: '7c8a3b2e8e6d8f9a1c2b3d4e5f6g7h8i' // Você precisa criar conta em imgbb.com e pegar sua chave
+        key: '2d2733ac18149b6571abee0faad687e9' // Você precisa criar conta em imgbb.com e pegar sua chave
       },
       headers: formData.getHeaders()
     })
