@@ -1,6 +1,18 @@
 import express from 'express'
 import cors from 'cors'
 import { chromium } from 'playwright'
+import ffmpeg from 'fluent-ffmpeg'
+import ffmpegStatic from 'ffmpeg-static'
+import { promises as fs } from 'fs'
+import { tmpdir } from 'os'
+import path from 'path'
+import FormData from 'form-data'
+import axios from 'axios'
+
+// Configurar FFmpeg
+if (ffmpegStatic) {
+  ffmpeg.setFfmpegPath(ffmpegStatic)
+}
 
 const app = express()
 const PORT = process.env.PORT || 3002
@@ -222,10 +234,116 @@ app.get('/scrape', async (req, res) => {
   }
 })
 
+// Endpoint para gerar thumbnail
+app.post('/generate-thumbnail', async (req, res) => {
+  let tempFilePath = null
+  
+  try {
+    const { vodId, m3u8Url, duration } = req.body
+    
+    if (!vodId || !m3u8Url) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'vodId e m3u8Url são obrigatórios' 
+      })
+    }
+    
+    console.log('🎬 Gerando thumbnail:', { vodId, duration })
+    
+    // Calcular timestamp baseado na duração
+    let timestamp = 300 // 5 minutos padrão
+    
+    if (duration && duration !== 'N/A') {
+      const parts = duration.split(':').map(p => parseInt(p))
+      let totalSeconds = 0
+      
+      if (parts.length === 3) {
+        totalSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2]
+      } else if (parts.length === 2) {
+        totalSeconds = parts[0] * 60 + parts[1]
+      }
+      
+      if (totalSeconds < 120) {
+        timestamp = Math.floor(totalSeconds / 2)
+      } else if (totalSeconds < 300) {
+        timestamp = 120
+      }
+    }
+    
+    // Gerar arquivo temporário
+    tempFilePath = path.join(tmpdir(), `${vodId}-${Date.now()}.jpg`)
+    
+    console.log('⏱️ Capturando frame aos', timestamp, 'segundos...')
+    
+    // Gerar thumbnail com FFmpeg
+    await new Promise((resolve, reject) => {
+      ffmpeg(m3u8Url)
+        .seekInput(timestamp)
+        .frames(1)
+        .size('1280x720')
+        .output(tempFilePath)
+        .on('end', () => {
+          console.log('✅ Thumbnail gerada')
+          resolve()
+        })
+        .on('error', (err) => {
+          console.error('❌ Erro FFmpeg:', err.message)
+          reject(err)
+        })
+        .run()
+    })
+    
+    // Ler arquivo
+    const imageBuffer = await fs.readFile(tempFilePath)
+    console.log(`📦 Arquivo: ${imageBuffer.length} bytes`)
+    
+    // Upload para ImgBB (alternativa gratuita ao MediaFire)
+    const formData = new FormData()
+    formData.append('image', imageBuffer.toString('base64'))
+    
+    const imgbbResponse = await axios.post('https://api.imgbb.com/1/upload', formData, {
+      params: {
+        key: '7c8a3b2e8e6d8f9a1c2b3d4e5f6g7h8i' // Você precisa criar conta em imgbb.com e pegar sua chave
+      },
+      headers: formData.getHeaders()
+    })
+    
+    const thumbnailUrl = imgbbResponse.data.data.url
+    console.log('✅ Upload concluído:', thumbnailUrl)
+    
+    // Limpar arquivo temporário
+    try {
+      await fs.unlink(tempFilePath)
+    } catch {}
+    
+    res.json({
+      success: true,
+      thumbnail: thumbnailUrl,
+      vodId
+    })
+    
+  } catch (error) {
+    console.error('❌ Erro ao gerar thumbnail:', error)
+    
+    // Limpar arquivo temporário
+    if (tempFilePath) {
+      try {
+        await fs.unlink(tempFilePath)
+      } catch {}
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
 app.listen(PORT, () => {
   console.log(`🚀 Scraper rodando na porta ${PORT}`)
   console.log(`📍 Test: http://localhost:${PORT}`)
   console.log(`📍 Scrape: http://localhost:${PORT}/scrape`)
+  console.log(`📍 Generate Thumbnail: http://localhost:${PORT}/generate-thumbnail`)
 })
 
 process.on('uncaughtException', (error) => {
