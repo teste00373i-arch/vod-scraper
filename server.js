@@ -137,9 +137,9 @@ app.get('/scrape', async (req, res) => {
           .replace(/🔥/g, '')
           .trim()
         
-        // Buscar thumbnail
+        // Buscar thumbnail (não usar vodvod.top pois não funciona)
         const img = parent?.querySelector('img')
-        const thumbnail = img?.src || img?.dataset?.src || `https://vodvod.top/thumbnail/${vodId}.jpg`
+        const thumbnail = img?.src || img?.dataset?.src || '/videos/thumbnails/odudutips-thumbnail.png'
         
         // Buscar duração
         const durationEl = parent?.querySelector('[class*="duration"]')
