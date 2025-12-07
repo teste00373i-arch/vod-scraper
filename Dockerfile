@@ -14,9 +14,11 @@ COPY . .
 # Expor porta
 EXPOSE 10000
 
-# Variável de ambiente
+# Variáveis de ambiente
 ENV NODE_ENV=production
 ENV PORT=10000
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Comando de inicialização
 CMD ["node", "server.js"]

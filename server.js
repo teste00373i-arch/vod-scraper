@@ -28,21 +28,36 @@ app.get('/scrape', async (req, res) => {
   
   try {
     console.log('🚀 Iniciando scraping...')
+    console.log('🔧 Ambiente:', process.env.NODE_ENV)
+    console.log('🔧 Playwright executável:', process.env.PLAYWRIGHT_BROWSERS_PATH || 'padrão')
     
+    // Configuração otimizada para Render
     browser = await chromium.launch({
       headless: true,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-gpu'
-      ]
+        '--disable-gpu',
+        '--disable-software-rasterizer',
+        '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-infobars',
+        '--window-position=0,0',
+        '--ignore-certifcate-errors',
+        '--ignore-certifcate-errors-spki-list',
+        '--disable-features=IsolateOrigins,site-per-process'
+      ],
+      timeout: 60000
     }).catch(err => {
-      console.error('❌ Erro ao iniciar browser:', err.message)
-      throw new Error('Falha ao iniciar navegador')
+      console.error('❌ Erro detalhado ao iniciar browser:', err)
+      throw new Error(`Falha ao iniciar navegador: ${err.message}`)
     })
 
-    console.log('✅ Browser iniciado')
+    console.log('✅ Browser iniciado com sucesso')
 
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
