@@ -1,11 +1,10 @@
 services:
   - type: web
     name: vodvod-scraper
-    env: node
+    env: docker
     region: oregon
     plan: free
-    buildCommand: npm ci && npx playwright install --with-deps chromium
-    startCommand: node server.js
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: NODE_ENV
         value: production
