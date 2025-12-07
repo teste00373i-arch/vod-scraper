@@ -242,8 +242,10 @@ app.post('/generate-thumbnail', async (req, res) => {
       })
     }
     
+    console.log('========================================')
     console.log('🖼️ Gerando thumbnail do vídeo:', videoUrl)
     console.log('⏱️ Timestamp:', timestamp, 'segundos')
+    console.log('========================================')
     
     // Criar arquivo temporário único
     const tempDir = tmpdir()
@@ -290,9 +292,17 @@ app.post('/generate-thumbnail', async (req, res) => {
     console.log('📺 Carregando player...')
     await page.setContent(playerHtml)
     
-    // Aguardar vídeo carregar e processar
+    // Aguardar vídeo estar pronto para reproduzir
     console.log('⏳ Aguardando vídeo carregar...')
-    await page.waitForTimeout(3000)
+    await page.waitForFunction(() => {
+      const video = document.getElementById('video');
+      return video && video.readyState >= 2; // HAVE_CURRENT_DATA
+    }, { timeout: 15000 })
+    
+    console.log('✅ Vídeo carregado!')
+    
+    // Aguardar mais um pouco para garantir
+    await page.waitForTimeout(2000)
     
     // Aguardar até o timestamp desejado
     if (timestamp > 0) {
@@ -300,10 +310,15 @@ app.post('/generate-thumbnail', async (req, res) => {
       await page.evaluate((t) => {
         const video = document.getElementById('video');
         video.currentTime = t;
+        return new Promise(resolve => {
+          video.onseeked = resolve;
+        });
       }, timestamp)
       
-      // Aguardar seek completar
-      await page.waitForTimeout(2000)
+      console.log('✅ Seek completado!')
+      
+      // Aguardar frame renderizar
+      await page.waitForTimeout(1500)
     }
     
     console.log('📸 Capturando screenshot do vídeo...')
@@ -356,6 +371,8 @@ app.post('/generate-thumbnail', async (req, res) => {
     
     const thumbnailUrl = imgbbResponse.data.data.url
     console.log('✅ Upload concluído! URL:', thumbnailUrl)
+    console.log('📊 Tamanho da imagem:', (imageBuffer.length / 1024).toFixed(2), 'KB')
+    console.log('========================================')
     
     // Limpar arquivo temporário
     try {
