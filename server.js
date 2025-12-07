@@ -275,13 +275,22 @@ app.post('/generate-thumbnail', async (req, res) => {
     
     console.log('⏱️ Capturando frame aos', timestamp, 'segundos...')
     
-    // Gerar thumbnail com FFmpeg
+    // Gerar thumbnail com FFmpeg (otimizado para evitar crash)
     await new Promise((resolve, reject) => {
-      ffmpeg(m3u8Url)
-        .seekInput(timestamp)
-        .frames(1)
-        .size('1280x720')
+      const command = ffmpeg(m3u8Url)
+        .inputOptions([
+          '-ss', timestamp.toString(),  // Seek antes de ler input (mais rápido)
+          '-t', '1'  // Ler apenas 1 segundo
+        ])
+        .outputOptions([
+          '-vframes', '1',  // 1 frame apenas
+          '-q:v', '2',  // Qualidade alta
+          '-vf', 'scale=1280:720'  // Resize
+        ])
         .output(tempFilePath)
+        .on('start', (cmd) => {
+          console.log('🎬 FFmpeg:', cmd.substring(0, 150))
+        })
         .on('end', () => {
           console.log('✅ Thumbnail gerada')
           resolve()
@@ -290,7 +299,14 @@ app.post('/generate-thumbnail', async (req, res) => {
           console.error('❌ Erro FFmpeg:', err.message)
           reject(err)
         })
-        .run()
+      
+      // Timeout de 30 segundos
+      setTimeout(() => {
+        command.kill('SIGKILL')
+        reject(new Error('Timeout ao gerar thumbnail'))
+      }, 30000)
+      
+      command.run()
     })
     
     // Ler arquivo
@@ -332,8 +348,12 @@ app.post('/generate-thumbnail', async (req, res) => {
       } catch {}
     }
     
-    res.status(500).json({
-      success: false,
+    // Retornar placeholder em caso de erro
+    res.json({
+      success: true,
+      thumbnail: '/videos/thumbnails/odudutips-thumbnail.png',
+      vodId,
+      usedPlaceholder: true,
       error: error.message
     })
   }
