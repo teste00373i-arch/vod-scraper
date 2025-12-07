@@ -236,35 +236,138 @@ app.get('/scrape', async (req, res) => {
 
 // Endpoint para gerar thumbnail
 app.post('/generate-thumbnail', async (req, res) => {
+  let tempFilePath = null
+  
   try {
-    const { vodId } = req.body
+    const { videoUrl, timestamp = '00:00:03' } = req.body
     
-    if (!vodId) {
+    if (!videoUrl) {
       return res.status(400).json({ 
         success: false, 
-        error: 'vodId é obrigatório' 
+        error: 'videoUrl é obrigatório' 
       })
     }
     
-    console.log('🖼️ Usando placeholder para:', vodId)
+    console.log('🖼️ Gerando thumbnail do vídeo:', videoUrl)
+    console.log('⏱️ Timestamp:', timestamp)
     
-    // FFmpeg não funciona de forma confiável no Render
-    // Retornar placeholder diretamente
-    res.json({
+    // Criar arquivo temporário único
+    const tempDir = tmpdir()
+    tempFilePath = path.join(tempDir, `thumb_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`)
+    
+    console.log('📁 Arquivo temporário:', tempFilePath)
+    
+    // Usar FFmpeg do sistema (instalado via apt-get no Docker)
+    await new Promise((resolve, reject) => {
+      const command = ffmpeg(videoUrl)
+        .setFfmpegPath('/usr/bin/ffmpeg') // FFmpeg do sistema Debian
+        .inputOptions([
+          '-ss', timestamp,           // Seek antes de ler
+          '-t', '3',                  // Lê apenas 3 segundos
+          '-reconnect', '1',          // Reconectar se cair
+          '-reconnect_streamed', '1', // Reconectar em streams
+          '-reconnect_delay_max', '2' // Max 2s de delay
+        ])
+        .outputOptions([
+          '-vframes', '1',            // Apenas 1 frame
+          '-vf', 'scale=640:-1',      // Redimensionar para 640px largura
+          '-q:v', '2'                 // Qualidade alta
+        ])
+        .output(tempFilePath)
+        .on('start', (cmd) => {
+          console.log('🎬 FFmpeg comando:', cmd)
+        })
+        .on('progress', (progress) => {
+          if (progress.percent) {
+            console.log(`📊 Progresso: ${Math.round(progress.percent)}%`)
+          }
+        })
+        .on('error', (err, stdout, stderr) => {
+          console.error('❌ FFmpeg erro:', err.message)
+          console.error('📋 FFmpeg stderr:', stderr)
+          reject(new Error(`FFmpeg falhou: ${err.message}`))
+        })
+        .on('end', () => {
+          console.log('✅ Thumbnail gerada:', tempFilePath)
+          resolve()
+        })
+      
+      // Timeout de 30 segundos
+      const timeout = setTimeout(() => {
+        command.kill('SIGKILL')
+        reject(new Error('Timeout: FFmpeg demorou mais de 30 segundos'))
+      }, 30000)
+      
+      command.on('end', () => clearTimeout(timeout))
+      command.on('error', () => clearTimeout(timeout))
+      
+      command.run()
+    })
+    
+    // Verificar se arquivo foi criado
+    try {
+      await fs.access(tempFilePath)
+    } catch {
+      throw new Error('Thumbnail não foi gerada')
+    }
+    
+    console.log('☁️ Fazendo upload para ImgBB...')
+    
+    // Upload para ImgBB
+    const imageBuffer = await fs.readFile(tempFilePath)
+    const base64Image = imageBuffer.toString('base64')
+    
+    const formData = new FormData()
+    formData.append('image', base64Image)
+    
+    const imgbbResponse = await axios.post(
+      `https://api.imgbb.com/1/upload?key=2d2733ac18149b6571abee0faad687e9`,
+      formData,
+      {
+        headers: formData.getHeaders(),
+        timeout: 15000 // 15 segundos timeout
+      }
+    )
+    
+    if (!imgbbResponse.data || !imgbbResponse.data.data || !imgbbResponse.data.data.url) {
+      throw new Error('Resposta inválida do ImgBB')
+    }
+    
+    const thumbnailUrl = imgbbResponse.data.data.url
+    console.log('✅ Upload concluído! URL:', thumbnailUrl)
+    
+    // Limpar arquivo temporário
+    try {
+      await fs.unlink(tempFilePath)
+      console.log('🗑️ Arquivo temporário removido')
+    } catch (cleanupError) {
+      console.error('⚠️ Erro ao limpar arquivo:', cleanupError)
+    }
+    
+    return res.json({
       success: true,
-      thumbnail: '/videos/thumbnails/odudutips-thumbnail.png',
-      vodId,
-      usedPlaceholder: true
+      thumbnailUrl: thumbnailUrl
     })
     
   } catch (error) {
-    console.error('❌ Erro:', error)
+    console.error('❌ Erro ao gerar thumbnail:', error)
     
-    res.json({
+    // Limpar arquivo temporário em caso de erro
+    if (tempFilePath) {
+      try {
+        await fs.unlink(tempFilePath)
+        console.log('🗑️ Arquivo temporário removido após erro')
+      } catch (cleanupError) {
+        console.error('⚠️ Erro ao limpar:', cleanupError)
+      }
+    }
+    
+    // Se falhar, retorna placeholder
+    console.log('🖼️ Retornando placeholder devido ao erro')
+    return res.json({
       success: true,
-      thumbnail: '/videos/thumbnails/odudutips-thumbnail.png',
-      vodId: req.body?.vodId,
-      usedPlaceholder: true,
+      thumbnailUrl: '/videos/thumbnails/odudutips-thumbnail.png',
+      message: 'Erro ao gerar thumbnail, usando placeholder',
       error: error.message
     })
   }

@@ -1,7 +1,7 @@
 # Usar imagem base do Ubuntu com Node
 FROM node:20-bookworm
 
-# Instalar dependências do sistema necessárias para Playwright
+# Instalar dependências do sistema necessárias para Playwright E FFmpeg
 RUN apt-get update && apt-get install -y \
     libnss3 \
     libnspr4 \
@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y \
     libasound2 \
     libatspi2.0-0 \
     libxshmfence1 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
