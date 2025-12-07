@@ -236,123 +236,34 @@ app.get('/scrape', async (req, res) => {
 
 // Endpoint para gerar thumbnail
 app.post('/generate-thumbnail', async (req, res) => {
-  let tempFilePath = null
-  
   try {
-    const { vodId, m3u8Url, duration } = req.body
+    const { vodId } = req.body
     
-    if (!vodId || !m3u8Url) {
+    if (!vodId) {
       return res.status(400).json({ 
         success: false, 
-        error: 'vodId e m3u8Url são obrigatórios' 
+        error: 'vodId é obrigatório' 
       })
     }
     
-    console.log('🎬 Gerando thumbnail:', { vodId, duration })
+    console.log('🖼️ Usando placeholder para:', vodId)
     
-    // Calcular timestamp baseado na duração
-    let timestamp = 300 // 5 minutos padrão
-    
-    if (duration && duration !== 'N/A') {
-      const parts = duration.split(':').map(p => parseInt(p))
-      let totalSeconds = 0
-      
-      if (parts.length === 3) {
-        totalSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2]
-      } else if (parts.length === 2) {
-        totalSeconds = parts[0] * 60 + parts[1]
-      }
-      
-      if (totalSeconds < 120) {
-        timestamp = Math.floor(totalSeconds / 2)
-      } else if (totalSeconds < 300) {
-        timestamp = 120
-      }
-    }
-    
-    // Gerar arquivo temporário
-    tempFilePath = path.join(tmpdir(), `${vodId}-${Date.now()}.jpg`)
-    
-    console.log('⏱️ Capturando frame aos', timestamp, 'segundos...')
-    
-    // Gerar thumbnail com FFmpeg (otimizado para evitar crash)
-    await new Promise((resolve, reject) => {
-      const command = ffmpeg(m3u8Url)
-        .inputOptions([
-          '-ss', timestamp.toString(),  // Seek antes de ler input (mais rápido)
-          '-t', '1'  // Ler apenas 1 segundo
-        ])
-        .outputOptions([
-          '-vframes', '1',  // 1 frame apenas
-          '-q:v', '2',  // Qualidade alta
-          '-vf', 'scale=1280:720'  // Resize
-        ])
-        .output(tempFilePath)
-        .on('start', (cmd) => {
-          console.log('🎬 FFmpeg:', cmd.substring(0, 150))
-        })
-        .on('end', () => {
-          console.log('✅ Thumbnail gerada')
-          resolve()
-        })
-        .on('error', (err) => {
-          console.error('❌ Erro FFmpeg:', err.message)
-          reject(err)
-        })
-      
-      // Timeout de 30 segundos
-      setTimeout(() => {
-        command.kill('SIGKILL')
-        reject(new Error('Timeout ao gerar thumbnail'))
-      }, 30000)
-      
-      command.run()
-    })
-    
-    // Ler arquivo
-    const imageBuffer = await fs.readFile(tempFilePath)
-    console.log(`📦 Arquivo: ${imageBuffer.length} bytes`)
-    
-    // Upload para ImgBB (alternativa gratuita ao MediaFire)
-    const formData = new FormData()
-    formData.append('image', imageBuffer.toString('base64'))
-    
-    const imgbbResponse = await axios.post('https://api.imgbb.com/1/upload', formData, {
-      params: {
-        key: '2d2733ac18149b6571abee0faad687e9' // Você precisa criar conta em imgbb.com e pegar sua chave
-      },
-      headers: formData.getHeaders()
-    })
-    
-    const thumbnailUrl = imgbbResponse.data.data.url
-    console.log('✅ Upload concluído:', thumbnailUrl)
-    
-    // Limpar arquivo temporário
-    try {
-      await fs.unlink(tempFilePath)
-    } catch {}
-    
-    res.json({
-      success: true,
-      thumbnail: thumbnailUrl,
-      vodId
-    })
-    
-  } catch (error) {
-    console.error('❌ Erro ao gerar thumbnail:', error)
-    
-    // Limpar arquivo temporário
-    if (tempFilePath) {
-      try {
-        await fs.unlink(tempFilePath)
-      } catch {}
-    }
-    
-    // Retornar placeholder em caso de erro
+    // FFmpeg não funciona de forma confiável no Render
+    // Retornar placeholder diretamente
     res.json({
       success: true,
       thumbnail: '/videos/thumbnails/odudutips-thumbnail.png',
       vodId,
+      usedPlaceholder: true
+    })
+    
+  } catch (error) {
+    console.error('❌ Erro:', error)
+    
+    res.json({
+      success: true,
+      thumbnail: '/videos/thumbnails/odudutips-thumbnail.png',
+      vodId: req.body?.vodId,
       usedPlaceholder: true,
       error: error.message
     })
