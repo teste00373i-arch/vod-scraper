@@ -268,12 +268,12 @@ app.post('/generate-thumbnail', async (req, res) => {
     <head>
       <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
       <style>
-        body { margin: 0; background: #000; }
-        video { width: 100vw; height: 100vh; object-fit: contain; }
+        body { margin: 0; background: #000; display: flex; align-items: center; justify-content: center; }
+        video { width: 1280px; height: 720px; object-fit: cover; }
       </style>
     </head>
     <body>
-      <video id="video" controls autoplay muted></video>
+      <video id="video" muted></video>
       <script>
         const video = document.getElementById('video');
         const hls = new Hls({ enableWorker: true });
@@ -306,8 +306,15 @@ app.post('/generate-thumbnail', async (req, res) => {
       await page.waitForTimeout(2000)
     }
     
-    console.log('📸 Capturando screenshot...')
-    await page.screenshot({ 
+    console.log('📸 Capturando screenshot do vídeo...')
+    
+    // Capturar apenas o elemento de vídeo (sem controles)
+    const videoElement = await page.$('#video')
+    if (!videoElement) {
+      throw new Error('Elemento de vídeo não encontrado')
+    }
+    
+    await videoElement.screenshot({ 
       path: tempFilePath,
       type: 'jpeg',
       quality: 85
