@@ -1,18 +1,11 @@
 import express from 'express'
 import cors from 'cors'
 import { chromium } from 'playwright'
-import ffmpeg from 'fluent-ffmpeg'
-import ffmpegStatic from 'ffmpeg-static'
 import { promises as fs } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import FormData from 'form-data'
 import axios from 'axios'
-
-// Configurar FFmpeg
-if (ffmpegStatic) {
-  ffmpeg.setFfmpegPath(ffmpegStatic)
-}
 
 const app = express()
 const PORT = process.env.PORT || 3002
@@ -234,12 +227,13 @@ app.get('/scrape', async (req, res) => {
   }
 })
 
-// Endpoint para gerar thumbnail
+// Endpoint para gerar thumbnail usando Playwright (screenshot do player)
 app.post('/generate-thumbnail', async (req, res) => {
+  let browser = null
   let tempFilePath = null
   
   try {
-    const { videoUrl, timestamp = '00:00:03' } = req.body
+    const { videoUrl, timestamp = 5 } = req.body
     
     if (!videoUrl) {
       return res.status(400).json({ 
@@ -249,66 +243,86 @@ app.post('/generate-thumbnail', async (req, res) => {
     }
     
     console.log('🖼️ Gerando thumbnail do vídeo:', videoUrl)
-    console.log('⏱️ Timestamp:', timestamp)
+    console.log('⏱️ Timestamp:', timestamp, 'segundos')
     
     // Criar arquivo temporário único
     const tempDir = tmpdir()
-    tempFilePath = path.join(tempDir, `thumb_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`)
+    tempFilePath = path.join(tempDir, `thumb_${Date.now()}_${Math.random().toString(36).substring(7)}.png`)
     
-    console.log('📁 Arquivo temporário:', tempFilePath)
-    
-    // Usar FFmpeg do sistema (instalado via apt-get no Docker)
-    await new Promise((resolve, reject) => {
-      const command = ffmpeg(videoUrl)
-        .setFfmpegPath('/usr/bin/ffmpeg') // FFmpeg do sistema Debian
-        .inputOptions([
-          '-ss', timestamp,           // Seek antes de ler
-          '-t', '3',                  // Lê apenas 3 segundos
-          '-reconnect', '1',          // Reconectar se cair
-          '-reconnect_streamed', '1', // Reconectar em streams
-          '-reconnect_delay_max', '2' // Max 2s de delay
-        ])
-        .outputOptions([
-          '-vframes', '1',            // Apenas 1 frame
-          '-vf', 'scale=640:-1',      // Redimensionar para 640px largura
-          '-q:v', '2'                 // Qualidade alta
-        ])
-        .output(tempFilePath)
-        .on('start', (cmd) => {
-          console.log('🎬 FFmpeg comando:', cmd)
-        })
-        .on('progress', (progress) => {
-          if (progress.percent) {
-            console.log(`📊 Progresso: ${Math.round(progress.percent)}%`)
-          }
-        })
-        .on('error', (err, stdout, stderr) => {
-          console.error('❌ FFmpeg erro:', err.message)
-          console.error('📋 FFmpeg stderr:', stderr)
-          reject(new Error(`FFmpeg falhou: ${err.message}`))
-        })
-        .on('end', () => {
-          console.log('✅ Thumbnail gerada:', tempFilePath)
-          resolve()
-        })
-      
-      // Timeout de 30 segundos
-      const timeout = setTimeout(() => {
-        command.kill('SIGKILL')
-        reject(new Error('Timeout: FFmpeg demorou mais de 30 segundos'))
-      }, 30000)
-      
-      command.on('end', () => clearTimeout(timeout))
-      command.on('error', () => clearTimeout(timeout))
-      
-      command.run()
+    console.log('🌐 Abrindo navegador...')
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
     })
+    
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 720 }
+    })
+    
+    const page = await context.newPage()
+    
+    // HTML com player HLS.js
+    const playerHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+      <style>
+        body { margin: 0; background: #000; }
+        video { width: 100vw; height: 100vh; object-fit: contain; }
+      </style>
+    </head>
+    <body>
+      <video id="video" controls autoplay muted></video>
+      <script>
+        const video = document.getElementById('video');
+        const hls = new Hls({ enableWorker: true });
+        hls.loadSource('${videoUrl}');
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          video.play();
+        });
+      </script>
+    </body>
+    </html>
+    `
+    
+    console.log('📺 Carregando player...')
+    await page.setContent(playerHtml)
+    
+    // Aguardar vídeo carregar e processar
+    console.log('⏳ Aguardando vídeo carregar...')
+    await page.waitForTimeout(3000)
+    
+    // Aguardar até o timestamp desejado
+    if (timestamp > 0) {
+      console.log(`⏩ Pulando para ${timestamp}s...`)
+      await page.evaluate((t) => {
+        const video = document.getElementById('video');
+        video.currentTime = t;
+      }, timestamp)
+      
+      // Aguardar seek completar
+      await page.waitForTimeout(2000)
+    }
+    
+    console.log('📸 Capturando screenshot...')
+    await page.screenshot({ 
+      path: tempFilePath,
+      type: 'jpeg',
+      quality: 85
+    })
+    
+    await browser.close()
+    browser = null
+    
+    console.log('✅ Screenshot capturada:', tempFilePath)
     
     // Verificar se arquivo foi criado
     try {
       await fs.access(tempFilePath)
     } catch {
-      throw new Error('Thumbnail não foi gerada')
+      throw new Error('Screenshot não foi capturada')
     }
     
     console.log('☁️ Fazendo upload para ImgBB...')
@@ -325,7 +339,7 @@ app.post('/generate-thumbnail', async (req, res) => {
       formData,
       {
         headers: formData.getHeaders(),
-        timeout: 15000 // 15 segundos timeout
+        timeout: 20000 // 20 segundos timeout
       }
     )
     
@@ -352,13 +366,23 @@ app.post('/generate-thumbnail', async (req, res) => {
   } catch (error) {
     console.error('❌ Erro ao gerar thumbnail:', error)
     
+    // Fechar navegador se ainda estiver aberto
+    if (browser) {
+      try {
+        await browser.close()
+      } catch (e) {
+        console.error('⚠️ Erro ao fechar navegador:', e)
+      }
+    }
+    
     // Limpar arquivo temporário em caso de erro
     if (tempFilePath) {
       try {
+        await fs.access(tempFilePath)
         await fs.unlink(tempFilePath)
         console.log('🗑️ Arquivo temporário removido após erro')
       } catch (cleanupError) {
-        console.error('⚠️ Erro ao limpar:', cleanupError)
+        // Arquivo não existe, ignorar
       }
     }
     
