@@ -297,7 +297,7 @@ app.post('/generate-thumbnail', async (req, res) => {
     await page.waitForFunction(() => {
       const video = document.getElementById('video');
       return video && video.readyState >= 2; // HAVE_CURRENT_DATA
-    }, { timeout: 15000 })
+    }, { timeout: 45000 })
     
     console.log('✅ Vídeo carregado!')
     
