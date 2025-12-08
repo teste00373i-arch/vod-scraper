@@ -19,12 +19,38 @@ app.get('/', (req, res) => {
     res.json({ 
       status: 'online',
       service: 'vodvod-scraper',
-      version: '2.0.0'
+      version: '2.0.0',
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString()
     })
   } catch (error) {
     console.error('❌ Erro no health check:', error)
     res.status(500).json({ error: error.message })
   }
+})
+
+// Rota de debug para monitoramento externo (UptimeRobot, etc)
+app.get('/api/debug', (req, res) => {
+  const uptime = process.uptime()
+  const hours = Math.floor(uptime / 3600)
+  const minutes = Math.floor((uptime % 3600) / 60)
+  
+  res.json({
+    status: 'ok',
+    message: '🟢 Scraper Service ativo',
+    service: 'vodvod-scraper',
+    version: '2.0.0',
+    uptime: `${hours}h ${minutes}min`,
+    memory: {
+      used: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`,
+      total: `${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)}MB`
+    },
+    environment: {
+      NODE_ENV: process.env.NODE_ENV || 'development',
+      PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH ? '✅ Definido' : '❌ Padrão'
+    },
+    timestamp: new Date().toISOString()
+  })
 })
 
 app.get('/scrape', async (req, res) => {
