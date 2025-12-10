@@ -447,11 +447,106 @@ app.post('/generate-thumbnail', async (req, res) => {
   }
 })
 
+// Rota para scraping do Instagram
+app.get('/api/instagram/:username', async (req, res) => {
+  let browser = null
+  
+  try {
+    const { username } = req.params
+    console.log(`📸 Buscando Instagram de @${username}`)
+    
+    browser = await chromium.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu'
+      ]
+    })
+    
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15'
+    })
+    
+    const page = await context.newPage()
+    
+    // Ir para a página do Instagram
+    await page.goto(`https://www.instagram.com/${username}/`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000
+    })
+    
+    // Esperar um pouco para carregar
+    await page.waitForTimeout(3000)
+    
+    // Tentar extrair dados do primeiro post
+    const postData = await page.evaluate(() => {
+      // Tentar pegar do JSON embutido na página
+      const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
+      for (const script of scripts) {
+        try {
+          const data = JSON.parse(script.textContent)
+          if (data['@type'] === 'ProfilePage') {
+            return {
+              found: true,
+              method: 'ld+json'
+            }
+          }
+        } catch (e) {}
+      }
+      
+      // Tentar pegar do meta tags
+      const ogImage = document.querySelector('meta[property="og:image"]')
+      if (ogImage) {
+        return {
+          found: true,
+          method: 'og:image',
+          media_url: ogImage.content
+        }
+      }
+      
+      return { found: false }
+    })
+    
+    await browser.close()
+    
+    if (postData.found) {
+      console.log(`✅ Post encontrado via ${postData.method}`)
+      res.json({
+        success: true,
+        post: {
+          shortcode: 'latest',
+          media_url: postData.media_url || '',
+          permalink: `https://www.instagram.com/${username}/`,
+          caption: `Último post do @${username}`,
+          timestamp: new Date().toISOString()
+        }
+      })
+    } else {
+      console.log('⚠️ Nenhum post encontrado')
+      res.json({
+        success: false,
+        error: 'Nenhum post encontrado'
+      })
+    }
+    
+  } catch (error) {
+    console.error('❌ Erro no scraping Instagram:', error)
+    if (browser) await browser.close()
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
 app.listen(PORT, () => {
   console.log(`🚀 Scraper rodando na porta ${PORT}`)
   console.log(`📍 Test: http://localhost:${PORT}`)
   console.log(`📍 Scrape: http://localhost:${PORT}/scrape`)
   console.log(`📍 Generate Thumbnail: http://localhost:${PORT}/generate-thumbnail`)
+  console.log(`📍 Instagram: http://localhost:${PORT}/api/instagram/:username`)
 })
 
 process.on('uncaughtException', (error) => {
